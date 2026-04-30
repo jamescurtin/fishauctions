@@ -1,5 +1,10 @@
 *.pyc
 .env
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+coverage-out/
 db.sqlite3
 auctions/static/rest_framework/
 set_env.sh

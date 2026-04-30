@@ -76,6 +76,22 @@ If you would like to upgrade all packages to the latest supported version, run `
 To run the same set of tests and lints that would be run in CI, run `docker compose run --rm test --ci`.
 This will fail if changes are required. There are additional commands below that can be used to run individual test/lint components and auto-fix issues where possible.
 
+#### Test runner
+
+The test suite runs under Django's `manage.py test` runner in CI. `pytest` is also available for local use; with `pyproject.toml` providing `DJANGO_SETTINGS_MODULE`, `pytest auctions/` will discover and run the existing TestCase-based suite without code changes. Selenium tests (`auctions/tests_selenium.py`) are intentionally excluded from default pytest collection — run them via `manage.py test auctions.tests_selenium --tag=selenium` as before.
+
+#### Coverage
+
+CI uploads `coverage.xml` and `htmlcov/` as artifacts on every run; download them from the GitHub Actions run summary to inspect line and branch coverage. There is no enforced threshold yet — this is for visibility, not gating.
+
+To produce coverage locally (with `docker compose up -d` already running so the `django` container is available):
+```
+docker exec -it django coverage run manage.py test
+docker exec -it django coverage report          # text summary
+docker exec -it django coverage html            # writes htmlcov/index.html
+```
+Configuration (source dirs, branch coverage, omit list) lives in `pyproject.toml` under `[tool.coverage.run]` and `[tool.coverage.report]`.
+
 #### Auto-formatting
 To format code, run `docker compose run --rm test --format`. This will attempt to auto-fix issues, if possible.
 

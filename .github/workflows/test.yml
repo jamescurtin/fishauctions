@@ -21,10 +21,38 @@ jobs:
       - run: ./.github/scripts/prepare-ci.sh
       - run: docker compose build
 
-      - name: Run Django tests in parallel
+      - name: Run Django tests in parallel with coverage
         # Override entrypoint.sh — it ignores its args and unconditionally
         # exec's uvicorn/gunicorn, which would never run the test command.
-        run: docker compose run --rm --entrypoint python3 web -u manage.py test --parallel auto
+        # chmod 777 lets the container's `app` user (uid 1000) write reports
+        # into the bind mount; same trick as prepare-ci.sh's logs/ dir.
+        run: |
+          mkdir -p coverage-out && chmod 777 coverage-out
+          docker compose run --rm --entrypoint sh web -c '
+            set +e
+            coverage run manage.py test --parallel auto
+            rc=$?
+            coverage combine 2>/dev/null
+            coverage xml -o coverage-out/coverage.xml
+            coverage html -d coverage-out/htmlcov
+            exit $rc
+          '
+
+      - name: Upload coverage XML
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage-out/coverage.xml
+          if-no-files-found: ignore
+
+      - name: Upload coverage HTML
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html
+          path: coverage-out/htmlcov/
+          if-no-files-found: ignore
 
       - name: Print service logs on failure
         if: failure()

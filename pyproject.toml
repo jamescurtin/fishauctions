@@ -1,0 +1,30 @@
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "fishauctions.settings"
+# tests_selenium.py is intentionally not matched — that suite is gated by
+# browser infrastructure and runs under `manage.py test --tag=selenium`.
+python_files = ["tests.py", "test_*.py"]
+
+[tool.coverage.run]
+parallel = true
+# /tmp dodges the docker bind-mount: the container's `app` user (uid 1000)
+# can't write the data file to a host-owned mount in CI.
+data_file = "/tmp/.coverage"
+source = ["auctions", "fishauctions"]
+branch = true
+omit = [
+    "*/migrations/*",
+    "*/tests*.py",
+    "*/test_*.py",
+    "manage.py",
+    "*/wsgi.py",
+    "*/asgi.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+]

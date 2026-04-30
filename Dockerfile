@@ -121,6 +121,10 @@ COPY --from=builder /usr/src/app/requirements.txt .
 RUN pip install --upgrade pip
 RUN pip install --no-cache /wheels/*
 RUN pip install mysql-connector-python
+# coverage[toml] is in the runtime image so CI's `compose run --rm` can
+# measure tests without a runtime pip install (which doesn't survive an
+# ephemeral container). Tiny footprint, useful for prod debugging too.
+RUN pip install --no-cache 'coverage[toml]'
 
 # Sometimes we need customizations made to python packages
 # List changes in the .sh script, making sure it fails gracefully
