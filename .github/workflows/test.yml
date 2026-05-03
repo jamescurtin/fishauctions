@@ -9,38 +9,30 @@ jobs:
     name: Lint (ruff via pre-commit)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
       - uses: pre-commit/action@v3.0.1
 
   django-tests:
     name: Django tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: ./.github/scripts/prepare-ci.sh
-      - run: docker compose build
+      - run: docker compose -f docker-compose.yaml -f docker-compose.ci.yaml --profile ci build test db
 
       - name: Run Django tests in parallel with coverage
-        # Override entrypoint.sh — it ignores its args and unconditionally
-        # exec's uvicorn/gunicorn, which would never run the test command.
         # chmod 777 lets the container's `app` user (uid 1000) write reports
         # into the bind mount; same trick as prepare-ci.sh's logs/ dir.
         run: |
           mkdir -p coverage-out && chmod 777 coverage-out
-          docker compose run --rm --entrypoint sh web -c '
-            set +e
-            coverage run manage.py test --parallel auto
-            rc=$?
-            coverage combine 2>/dev/null
-            coverage xml -o coverage-out/coverage.xml
-            coverage html -d coverage-out/htmlcov
-            exit $rc
-          '
+          docker compose -f docker-compose.yaml -f docker-compose.ci.yaml --profile ci run --rm test bash .github/scripts/run-django-tests.sh
 
       - name: Upload coverage XML
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: coverage-xml
           path: coverage-out/coverage.xml
@@ -48,7 +40,7 @@ jobs:
 
       - name: Upload coverage HTML
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: coverage-html
           path: coverage-out/htmlcov/
@@ -58,13 +50,13 @@ jobs:
         if: failure()
         run: |
           echo "=== docker compose ps ==="
-          docker compose ps -a || true
+          docker compose -f docker-compose.yaml -f docker-compose.ci.yaml ps -a || true
           echo "=== db logs ==="
-          docker compose logs db || true
-          echo "=== web logs ==="
-          docker compose logs web || true
+          docker compose -f docker-compose.yaml -f docker-compose.ci.yaml logs db || true
+          echo "=== test logs ==="
+          docker compose -f docker-compose.yaml -f docker-compose.ci.yaml logs test || true
 
-      - run: docker compose down
+      - run: docker compose -f docker-compose.yaml -f docker-compose.ci.yaml down
         if: always()
 
   selenium-tests:
@@ -73,68 +65,26 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: ./.github/scripts/prepare-ci.sh
       - name: Build containers
-        run: |
-          docker compose --profile selenium build
-      - name: Start database first and wait for health
-        run: |
-          echo "Starting database container..."
-          docker compose up -d db
-          echo "Waiting for database to be healthy (up to 240 seconds)..."
-          for i in {1..80}; do
-            STATUS=$(docker inspect --format='{{.State.Health.Status}}' db 2>/dev/null || echo "not_found")
-            if [ "$STATUS" = "healthy" ]; then
-              echo "Database is healthy!"
-              exit 0
-            fi
-            echo "Database status: $STATUS (attempt $i/80)"
-            sleep 3
-          done
-          echo "ERROR: Database failed to become healthy"
-          docker compose logs db
-          exit 1
-      - name: Start remaining services
-        run: |
-          echo "Starting all services including selenium profile..."
-          docker compose --profile selenium up -d
-          echo "Waiting for services to initialize..."
-          sleep 10
-      - name: Wait for services to be ready
-        run: |
-          echo "Waiting for services to start..."
-          for i in {1..24}; do
-            if docker exec django python3 -c "import django; django.setup()" 2>/dev/null; then
-              echo "Django service is ready"
-              break
-            fi
-            echo "Waiting for Django... ($i/24)"
-            sleep 5
-          done
-          for i in {1..12}; do
-            if docker exec selenium curl -sSL http://localhost:4444/status 2>/dev/null | grep -qE '"ready"[[:space:]]*:[[:space:]]*true'; then
-              echo "Selenium service is ready"
-              break
-            fi
-            echo "Waiting for Selenium... ($i/12)"
-            sleep 5
-          done
-          docker compose ps
-      - name: Install Selenium in Django container
-        run: |
-          docker exec -u root django pip install selenium
+        run: docker compose -f docker-compose.yaml -f docker-compose.ci.yaml --profile selenium build
+      - name: Start all services and wait for health
+        # `--wait` honors the db, web (Dockerfile HEALTHCHECK), and selenium
+        # healthchecks. Replaces the prior hand-rolled polling loops.
+        run: docker compose -f docker-compose.yaml -f docker-compose.ci.yaml --profile selenium up -d --wait --wait-timeout 240
       - name: Run Selenium tests
-        run: |
-          docker exec django python3 manage.py test auctions.tests_selenium --tag=selenium -v 2
+        # `web` is built from the `test` target via the CI overlay, so selenium
+        # is already installed — no runtime pip install needed.
+        run: docker exec django python3 manage.py test auctions.tests_selenium --tag=selenium -v 2
       - name: Show logs on failure
         if: failure()
         run: |
           echo "=== Database logs ==="
-          docker compose logs db
+          docker compose -f docker-compose.yaml -f docker-compose.ci.yaml logs db
           echo "=== Web logs ==="
-          docker compose logs web
+          docker compose -f docker-compose.yaml -f docker-compose.ci.yaml logs web
           echo "=== Selenium logs ==="
-          docker compose logs selenium
+          docker compose -f docker-compose.yaml -f docker-compose.ci.yaml logs selenium
           echo "=== Container status ==="
-          docker compose ps -a
+          docker compose -f docker-compose.yaml -f docker-compose.ci.yaml ps -a

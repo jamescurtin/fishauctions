@@ -1,0 +1,10 @@
+# CI overlay: build the web/django container from the `test` Dockerfile target
+# so it carries selenium, coverage, pytest, etc. Used in CI as:
+#   docker compose -f docker-compose.yaml -f docker-compose.ci.yaml ...
+# Service identity (container_name, network aliases, env, volumes, depends_on)
+# is inherited from docker-compose.yaml — only the build target differs.
+services:
+  web:
+    build:
+      context: .
+      target: test

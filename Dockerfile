@@ -43,16 +43,6 @@ COPY ./requirements.txt .
 RUN pip wheel --no-cache-dir --no-deps --wheel-dir /usr/src/app/wheels -r requirements.txt
 
 #########
-# Test and CI #
-#########
-
-# pull official base image
-FROM python:3.11.9-slim AS test
-COPY ./requirements-test.txt .
-RUN pip install -r requirements-test.txt
-
-
-#########
 # Dev Container #
 #########
 
@@ -63,11 +53,11 @@ RUN pip install -r requirements.txt
 RUN pip install -r requirements-test.txt
 
 #########
-# FINAL #
+# RUNTIME (production) #
 #########
 
 # pull official base image
-FROM python:3.11.9-slim
+FROM python:3.11.9-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
@@ -120,11 +110,6 @@ COPY --from=builder /usr/src/app/wheels /wheels
 COPY --from=builder /usr/src/app/requirements.txt .
 RUN pip install --upgrade pip
 RUN pip install --no-cache /wheels/*
-RUN pip install mysql-connector-python
-# coverage[toml] is in the runtime image so CI's `compose run --rm` can
-# measure tests without a runtime pip install (which doesn't survive an
-# ephemeral container). Tiny footprint, useful for prod debugging too.
-RUN pip install --no-cache 'coverage[toml]'
 
 # Sometimes we need customizations made to python packages
 # List changes in the .sh script, making sure it fails gracefully
@@ -153,4 +138,19 @@ USER app
 
 EXPOSE 8000
 
+# uvicorn/gunicorn binds 8000 once entrypoint.sh finishes migrations.
+# Port-open is a sufficient readiness signal; netcat-traditional is installed above.
+HEALTHCHECK --interval=5s --timeout=3s --start-period=30s --retries=12 \
+  CMD nc -z localhost 8000 || exit 1
+
 ENTRYPOINT ["sh", "./entrypoint.sh"]
+
+#########
+# TEST (CI) — runtime + test deps layered on top #
+#########
+
+FROM runtime AS test
+USER root
+COPY ./requirements-test.txt .
+RUN pip install --no-cache-dir -r requirements-test.txt
+USER app

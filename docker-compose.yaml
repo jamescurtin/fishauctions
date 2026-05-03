@@ -1,6 +1,8 @@
 services:
   web:
-    build: .
+    build:
+      context: .
+      target: runtime
     container_name: django
     volumes:
       - .:/home/app/web
@@ -18,7 +20,9 @@ services:
     restart: always
 
   celery_worker:
-    build: .
+    build:
+      context: .
+      target: runtime
     container_name: celery_worker
     entrypoint: ["sh", "./celery_worker_entrypoint.sh"]
     volumes:
@@ -31,7 +35,9 @@ services:
     restart: always
 
   celery_beat:
-    build: .
+    build:
+      context: .
+      target: runtime
     container_name: celery_beat
     entrypoint: ["sh", "./celery_beat_entrypoint.sh"]
     volumes:
@@ -43,16 +49,21 @@ services:
       - redis
     restart: always
 
+  # CI test runner. Built from the Dockerfile `test` target (= runtime image
+  # plus requirements-test.txt). Invoke with an explicit command, e.g.:
+  #   docker compose --profile ci run --rm test bash .github/scripts/run-django-tests.sh
+  # `entrypoint: []` clears the production entrypoint inherited from the
+  # Dockerfile (which would otherwise start uvicorn and ignore our command).
   test:
     build:
       context: .
-      dockerfile: Dockerfile
       target: test
     volumes:
       - .:/home/app/web
-    entrypoint: [/bin/bash, /home/app/web/.github/scripts/test-and-lint.sh]
+      - ./coverage-out:/home/app/web/coverage-out
     env_file: .env
-    profiles: [test]
+    entrypoint: []
+    profiles: [ci]
     depends_on:
       db:
         condition: service_healthy
@@ -84,7 +95,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 60
-      start_period: 30s # mariadb typically starts in under 60s; CI uses a separate 240s wait loop
+      start_period: 30s # mariadb typically starts in under 60s
 
   redis:
     container_name: redis
